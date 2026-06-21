@@ -17,7 +17,6 @@ __pycache__/
 .tox/
 .coverage
 .cache/
-.ipynb_checkpoints/
 
 # Virtual environments
 .venv/
@@ -28,3 +27,18 @@ env/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Large candidate datasets
+candidates.jsonl
+submission_files/candidates.jsonl
+test_candidates.jsonl
+test_submission.csv
+features.parquet
+metadata.parquet
+temp_features.parquet
+temp_metadata.parquet
+nlp_semantic_features.parquet
+
+# Raw challenge downloads
+*India_runs_data_and_ai_challenge/
+__MACOSX/

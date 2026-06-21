@@ -2,6 +2,7 @@ import json
 import gzip
 import datetime
 import math
+import os
 from dateutil import parser
 import pandas as pd
 import numpy as np
@@ -38,11 +39,9 @@ def parse_date(d_str):
     except:
         return None
 
-def main():
-    print("Starting preprocessing...")
+def run_preprocessing(input_file='candidates.jsonl', features_out='dataset/features.parquet', metadata_out='dataset/metadata.parquet'):
+    print(f"Starting preprocessing on {input_file}...")
     start_time = datetime.datetime.now()
-    
-    input_file = 'candidates.jsonl'
     
     # Trackers for Step 1
     total_records = 0
@@ -81,23 +80,26 @@ def main():
             if not line.strip():
                 continue
             cand = json.loads(line)
+            if not cand:
+                continue
             total_records += 1
             
             c_id = cand.get('candidate_id')
-            profile = cand.get('profile', {})
-            career = cand.get('career_history', [])
-            education = cand.get('education', [])
-            skills = cand.get('skills', [])
-            certs = cand.get('certifications', [])
-            langs = cand.get('languages', [])
-            signals = cand.get('redrob_signals', {})
+            profile = cand.get('profile') or {}
+            career = cand.get('career_history') or []
+            education = cand.get('education') or []
+            skills = cand.get('skills') or []
+            certs = cand.get('certifications') or []
+            langs = cand.get('languages') or []
+            signals = cand.get('redrob_signals') or {}
             
             # Step 1 stats
             if not certs: missing_certs += 1
             if not langs: missing_langs += 1
-            grades = [e.get('grade') for e in education if e.get('grade')]
+            grades = [e.get('grade') for e in education if e and e.get('grade')]
             if not grades: missing_grades += 1
-            if signals.get('github_activity_score') == -1: missing_github += 1
+            github_score_raw = signals.get('github_activity_score')
+            if github_score_raw is not None and github_score_raw == -1: missing_github += 1
             
             yoe = profile.get('years_of_experience')
             if yoe is not None: years_of_exp_dist.append(yoe)
@@ -112,21 +114,21 @@ def main():
             yoe = float(yoe) if yoe is not None else 0.0
             yoe = max(0.0, min(40.0, yoe))
             
-            loc = profile.get('location', '')
+            loc = str(profile.get('location') or '')
             is_pref_loc = False
             for city in tier_1_cities:
                 if city in loc.lower():
                     is_pref_loc = True
                     break
             
-            will_relocate = signals.get('willing_to_relocate', False)
-            country = str(profile.get('country', '')).strip().lower()
+            will_relocate = bool(signals.get('willing_to_relocate') or False)
+            country = str(profile.get('country') or '').strip().lower()
             
             size_map = {"1-10": 5, "11-50": 30, "51-200": 125, "201-500": 350, "501-1000": 750, "1001-5000": 3000, "5001-10000": 7500, "10001+": 10000}
-            curr_size_str = profile.get('current_company_size', '')
+            curr_size_str = str(profile.get('current_company_size') or '')
             curr_size = size_map.get(curr_size_str, -1)
             
-            is_services_curr = any(sc in str(profile.get('current_company', '')).lower() for sc in services_companies)
+            is_services_curr = any(sc in str(profile.get('current_company') or '').lower() for sc in services_companies)
             is_services_any = is_services_curr
             
             # Skills processing
@@ -138,12 +140,15 @@ def main():
             has_cv = False
             
             for sk in skills:
-                name = normalize_skill(sk.get('name', ''))
+                if not sk: continue
+                name = normalize_skill(sk.get('name') or '')
                 if not name: continue
                 all_skills[name] += 1
-                p = prof_map.get(sk.get('proficiency', 'beginner'), 1)
-                dur = sk.get('duration_months', 0)
-                endrs = sk.get('endorsements', 0)
+                p = prof_map.get(str(sk.get('proficiency') or 'beginner').lower(), 1)
+                dur = sk.get('duration_months')
+                dur = int(dur) if dur is not None else 0
+                endrs = sk.get('endorsements')
+                endrs = int(endrs) if endrs is not None else 0
                 cand_skills[name] = (p, dur, endrs)
                 
                 if p == 4 and dur == 0:
@@ -170,44 +175,45 @@ def main():
             
             parsed_roles = []
             for role in career:
+                if not role: continue
                 s_date = parse_date(role.get('start_date'))
                 e_date = parse_date(role.get('end_date'))
                 if role.get('is_current'): e_date = today
                 
+                calc_dur = None
                 if s_date and e_date:
                     if e_date < s_date or s_date > today:
                         career_impossible_dates = True
                     calc_dur = (e_date.year - s_date.year) * 12 + (e_date.month - s_date.month)
-                else:
-                    calc_dur = role.get('duration_months', 0)
                 
-                given_dur = role.get('duration_months', 0)
-                if abs(calc_dur - given_dur) > 3:
-                    dur_discrepancy = True
+                given_dur = role.get('duration_months')
+                given_dur = int(given_dur) if given_dur is not None else 0
                 
-                actual_dur = calc_dur if calc_dur > 0 else given_dur
+                actual_dur = calc_dur if (calc_dur is not None and calc_dur > 0) else given_dur
                 total_career_months += actual_dur
                 
-                role_size = size_map.get(role.get('company_size'), -1)
+                role_size_str = str(role.get('company_size') or '')
+                role_size = size_map.get(role_size_str, -1)
                 if role_size == 5 and actual_dur > 120:
                     impossible_founding = True
                     
-                is_svc = any(sc in str(role.get('company', '')).lower() for sc in services_companies)
+                role_company = str(role.get('company') or '')
+                is_svc = any(sc in role_company.lower() for sc in services_companies)
                 if is_svc:
                     is_services_any = True
                 else:
                     is_services_only = False
                     
-                ind = str(role.get('industry', '')).lower()
+                ind = str(role.get('industry') or '').lower()
                 is_consulting = 'consulting' in ind or 'services' in ind or 'outsourcing' in ind
                 if not is_svc and not is_consulting:
                     product_company_months += actual_dur
                     
-                desc = str(role.get('description', '')).lower()
+                desc = str(role.get('description') or '').lower()
                 if any(w in desc for w in ['production', 'deployed', 'prod', 'shipped', 'launched']):
                     has_prod_deployment = True
                     
-                tit = str(role.get('title', '')).lower()
+                tit = str(role.get('title') or '').lower()
                 is_ai = any(w in tit or w in desc for w in ['ai', 'ml', 'retrieval', 'search', 'recommendation'])
                 if is_ai and s_date:
                     months_ago = (today.year - s_date.year)*12 + (today.month - s_date.month)
@@ -248,9 +254,11 @@ def main():
             max_tier = 0
             highest_degree = 0 # 5: PhD, 4: Master's, 3: Bachelor's, 2: Diploma, 1: Other
             for ed in education:
-                t = tier_map.get(ed.get('tier', 'unknown'), 0)
+                if not ed: continue
+                tier_str = str(ed.get('tier') or 'unknown')
+                t = tier_map.get(tier_str, 0)
                 max_tier = max(max_tier, t)
-                deg = str(ed.get('degree', '')).lower()
+                deg = str(ed.get('degree') or '').lower()
                 d_val = 1
                 if 'phd' in deg or 'doctor' in deg: d_val = 5
                 elif 'master' in deg or 'ms' in deg or 'mtech' in deg or 'mba' in deg: d_val = 4
@@ -263,43 +271,59 @@ def main():
             days_since_active = (today - last_active).days if last_active else 0
             is_stale = days_since_active > 90
             
-            salary = signals.get('expected_salary_range_inr_lpa', {})
-            s_min = salary.get('min', 0)
-            s_max = salary.get('max', 0)
+            salary = signals.get('expected_salary_range_inr_lpa') or {}
+            s_min = salary.get('min')
+            s_min = float(s_min) if s_min is not None else 0.0
+            s_max = salary.get('max')
+            s_max = float(s_max) if s_max is not None else 0.0
             sal_mid = (s_min + s_max) / 2.0
             sal_out_of_range = sal_mid > 60 or (s_min == 0 and s_max == 0)
             
-            np_days = signals.get('notice_period_days', 0)
+            np_days = signals.get('notice_period_days')
+            np_days = int(np_days) if np_days is not None else 0
             notice_too_long = np_days > 60
             
             # Honeypot detection
-            curr_title = str(profile.get('current_title', '')).lower()
+            curr_title = str(profile.get('current_title') or '').lower()
             title_mismatch = ('senior' in curr_title or 'lead' in curr_title) and yoe < 2
             
-            conn_count = signals.get('connection_count', 0)
-            end_recv = signals.get('endorsements_received', 0)
+            conn_count = signals.get('connection_count')
+            conn_count = int(conn_count) if conn_count is not None else 0
+            end_recv = signals.get('endorsements_received')
+            end_recv = int(end_recv) if end_recv is not None else 0
             end_anom = end_recv > 500 and conn_count < 10
             
+            profile_comp = signals.get('profile_completeness_score')
+            profile_comp = float(profile_comp) if profile_comp is not None else 0.0
+            recruiter_resp = signals.get('recruiter_response_rate')
+            recruiter_resp = float(recruiter_resp) if recruiter_resp is not None else 0.0
+            interview_comp = signals.get('interview_completion_rate')
+            interview_comp = float(interview_comp) if interview_comp is not None else 0.0
+            offer_accept = signals.get('offer_acceptance_rate')
+            offer_accept = float(offer_accept) if offer_accept is not None else 0.0
+            github_score = signals.get('github_activity_score')
+            github_score = float(github_score) if github_score is not None else 0.0
+            
             perf_sig = (
-                signals.get('profile_completeness_score') == 100 and
-                signals.get('recruiter_response_rate') == 1.0 and
-                signals.get('interview_completion_rate') == 1.0 and
-                signals.get('offer_acceptance_rate') == 1.0 and
-                signals.get('github_activity_score') == 100
+                profile_comp == 100.0 and
+                recruiter_resp == 1.0 and
+                interview_comp == 1.0 and
+                offer_accept == 1.0 and
+                github_score == 100.0
             )
             
             # Lower threshold: advanced OR expert with 0 duration_months used
             expert_0_dur_count = sum(
                 1 for sk in skills
-                if prof_map.get(sk.get('proficiency', ''), 0) >= 3
-                and sk.get('duration_months', 0) == 0
+                if sk and prof_map.get(str(sk.get('proficiency') or '').lower(), 0) >= 3
+                and (sk.get('duration_months') or 0) == 0
             )
             suspicious_skills = expert_0_dur_count >= 4
             
             # Career start date in the future
             has_future_start = any(
                 parse_date(r.get('start_date')) is not None and parse_date(r.get('start_date')) > today
-                for r in career
+                for r in career if r
             )
             
             # Claimed YoE vs actual career months — flag if gap > 3 years
@@ -332,8 +356,9 @@ def main():
             core_score = calc_skill_score(core_skills)
             strong_score = calc_skill_score(strong_skills)
             adj_score = calc_skill_score(adjacent_skills)
+            core_skills_count = sum(1 for sk in cand_skills if sk in core_skills)
             
-            skill_assessments = signals.get('skill_assessment_scores', {})
+            skill_assessments = signals.get('skill_assessment_scores') or {}
             bonus = 0.0
             for sk, sc in skill_assessments.items():
                 nsk = normalize_skill(sk)
@@ -352,12 +377,19 @@ def main():
             avg_tenure_score = avg_ten_capped / 36.0
             
             # Engagement components
-            app_sub = signals.get('applications_submitted_30d', 0)
-            prof_views = signals.get('profile_views_received_30d', 0)
-            saved = signals.get('saved_by_recruiters_30d', 0)
-            searches = signals.get('search_appearance_30d', 0)
+            app_sub = signals.get('applications_submitted_30d')
+            app_sub = int(app_sub) if app_sub is not None else 0
+            prof_views = signals.get('profile_views_received_30d')
+            prof_views = int(prof_views) if prof_views is not None else 0
+            saved = signals.get('saved_by_recruiters_30d')
+            saved = int(saved) if saved is not None else 0
+            searches = signals.get('search_appearance_30d')
+            searches = int(searches) if searches is not None else 0
             
-            plat_trust = (int(signals.get('verified_email', False)) + int(signals.get('verified_phone', False)) + int(signals.get('linkedin_connected', False))) / 3.0
+            verified_email = bool(signals.get('verified_email') or False)
+            verified_phone = bool(signals.get('verified_phone') or False)
+            linkedin_connected = bool(signals.get('linkedin_connected') or False)
+            plat_trust = (int(verified_email) + int(verified_phone) + int(linkedin_connected)) / 3.0
             
             if is_pref_loc:
                 loc_score = 1.0
@@ -384,9 +416,9 @@ def main():
                 'avg_tenure_score': avg_tenure_score,
                 'has_production_deployment': has_prod_deployment,
                 'is_stale': is_stale,
-                'open_to_work_flag': signals.get('open_to_work_flag', False),
-                'recruiter_response_rate': signals.get('recruiter_response_rate', 0.0),
-                'interview_completion_rate': signals.get('interview_completion_rate', 0.0),
+                'open_to_work_flag': bool(signals.get('open_to_work_flag') or False),
+                'recruiter_response_rate': recruiter_resp,
+                'interview_completion_rate': interview_comp,
                 'app_sub': app_sub,
                 'prof_views': prof_views,
                 'saved': saved,
@@ -407,15 +439,18 @@ def main():
             
             meta = {
                 'candidate_id': c_id,
-                'current_title': profile.get('current_title', ''),
+                'current_title': str(profile.get('current_title') or ''),
                 'years_of_experience': yoe,
-                'location': profile.get('location', ''),
-                'country': profile.get('country', ''),
-                'headline': profile.get('headline', ''),
+                'location': str(profile.get('location') or ''),
+                'country': str(profile.get('country') or ''),
+                'headline': str(profile.get('headline') or ''),
                 'is_honeypot_suspect': is_honeypot,
                 'is_job_hopper': is_job_hopper,
                 'is_services_only': is_services_only,
-                'is_stale_profile': is_stale
+                'is_stale_profile': is_stale,
+                'recruiter_response_rate': recruiter_resp,
+                'notice_period_days': np_days,
+                'core_skills_count': int(core_skills_count)
             }
             metadata_list.append(meta)
             
@@ -425,13 +460,18 @@ def main():
     df_meta = pd.DataFrame(metadata_list)
     
     # Normalize skill scores [0, 1]
-    for col in ['core_skill_score_raw', 'strong_skill_score_raw', 'adjacent_skill_score_raw']:
-        max_val = df_feat[col].max()
-        if max_val > 0:
-            df_feat[col.replace('_raw', '')] = df_feat[col] / max_val
-        else:
-            df_feat[col.replace('_raw', '')] = 0.0
-        df_feat.drop(columns=[col], inplace=True)
+    if not df_feat.empty:
+        for col in ['core_skill_score_raw', 'strong_skill_score_raw', 'adjacent_skill_score_raw']:
+            max_val = df_feat[col].max()
+            if max_val > 0:
+                df_feat[col.replace('_raw', '')] = df_feat[col] / max_val
+            else:
+                df_feat[col.replace('_raw', '')] = 0.0
+            df_feat.drop(columns=[col], inplace=True)
+    else:
+        for col in ['core_skill_score_raw', 'strong_skill_score_raw', 'adjacent_skill_score_raw']:
+            df_feat[col.replace('_raw', '')] = pd.Series(dtype='float32')
+            df_feat.drop(columns=[col], inplace=True)
         
     # Availability Score
     df_feat['availability_score'] = (
@@ -467,8 +507,10 @@ def main():
         
     # Output
     print("Saving parquets...")
-    df_feat.to_parquet('features.parquet', index=False)
-    df_meta.to_parquet('metadata.parquet', index=False)
+    os.makedirs(os.path.dirname(os.path.abspath(features_out)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(metadata_out)), exist_ok=True)
+    df_feat.to_parquet(features_out, engine='fastparquet', index=False)
+    df_meta.to_parquet(metadata_out, engine='fastparquet', index=False)
     
     # Report / Summary
     print("\n--- Summary ---")
@@ -501,6 +543,9 @@ def main():
 
     end_time = datetime.datetime.now()
     print(f"\nCompleted in {(end_time - start_time).total_seconds():.1f} seconds.")
+
+def main():
+    run_preprocessing('candidates.jsonl')
 
 if __name__ == '__main__':
     main()

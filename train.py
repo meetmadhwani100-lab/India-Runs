@@ -31,8 +31,8 @@ features_path = f"../input/{DATASET_FOLDER_NAME}/features.parquet"
 # Fallback checking loop to prevent crash if data is placed in the local workspace directory instead
 if not os.path.exists(metadata_path):
     print("Kaggle input path not found. Falling back to local working directory pathing...")
-    metadata_path = "metadata.parquet"
-    features_path = "features.parquet"
+    metadata_path = "dataset/metadata.parquet"
+    features_path = "dataset/features.parquet"
 
 if not os.path.exists(metadata_path) or not os.path.exists(features_path):
     raise FileNotFoundError(
@@ -41,8 +41,8 @@ if not os.path.exists(metadata_path) or not os.path.exists(features_path):
     )
 
 print(f"Successfully located files.\n -> Reading Metadata from: {metadata_path}\n -> Reading Features from: {features_path}")
-df_meta = pd.read_parquet(metadata_path)
-df_feat = pd.read_parquet(features_path)
+df_meta = pd.read_parquet(metadata_path, engine='fastparquet')
+df_feat = pd.read_parquet(features_path, engine='fastparquet')
 
 print(f"Loaded Metadata Shape: {df_meta.shape}")
 print(f"Loaded Features Shape: {df_feat.shape}")
@@ -161,7 +161,12 @@ nlp_features_output = pd.DataFrame({
 })
 
 output_filename = "nlp_semantic_features.parquet"
-nlp_features_output.to_parquet(output_filename, index=False)
+nlp_features_output.to_parquet(output_filename, engine='fastparquet', index=False)
+local_dataset_path = "dataset/nlp_semantic_features.parquet"
+if os.path.exists("dataset"):
+    os.makedirs(os.path.dirname(local_dataset_path), exist_ok=True)
+    nlp_features_output.to_parquet(local_dataset_path, engine='fastparquet', index=False)
+    print(f"Also saved local copy to: '{local_dataset_path}'")
 
 print(f"\n🎯 SUCCESS! Custom NLP model has been trained and evaluated.")
 print(f"💾 Feature file exported as: '{output_filename}' in your Kaggle working directory.")
