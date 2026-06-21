@@ -3,6 +3,25 @@
 
 ---
 
+## 🤖 Custom AI/ML Candidate Matching Model
+
+An end-to-end NLP recruitment pipeline that fine-tunes a **Transformer-based Siamese Network (Bi-Encoder)** to intelligently match candidate profiles with complex Job Descriptions (JDs).
+
+### 🚀 Why It's Used
+
+* **Semantic Search:** Moves beyond fragile keyword matching by embedding profiles and JDs into a shared latent space to understand contextual intent (e.g., recognizing that "Deep Learning" relates to "AI/ML Engineer").
+* **Recruiter Alignment:** Fine-tunes a pre-trained encoder (`bge-base` / `MiniLM`) using specialized domain scores (skills, seniority, AI relevance) to mimic human vetting.
+* **Fraud Detection:** Integrates a security layer that actively trains the model to penalize and reject "honeypot" or heavily faked applicant profiles.
+
+### 🛠️ Technical Workflow
+
+1. **Data Synthesis:** Merges metadata and engineered features into structured natural language profile summaries.
+2. **Contrastive Fine-Tuning:** Trains the network using `CosineSimilarityLoss` against a continuous `0.0 - 1.0` target fitness scale.
+3. **Optimized Retrieval:** Computes rapid matrix-based **Cosine Similarity** dot products between the JD vector and the entire candidate embedding space.
+4. **Feature Export:** Outputs an engineered `trained_nlp_match_score` to a `.parquet` file for seamless integration into downstream machine learning rankers.
+
+---
+
 ## Files included
 
 | File | Use |
