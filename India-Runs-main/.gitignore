@@ -1,0 +1,44 @@
+# Ignore large model files
+**/model.safetensors
+**/*.safetensors
+**/*.bin
+**/*.pth
+**/*.onnx
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+.virtual_documents/
+
+# Python cache and temporary files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.tox/
+.coverage
+.cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large candidate datasets
+candidates.jsonl
+submission_files/candidates.jsonl
+test_candidates.jsonl
+test_submission.csv
+features.parquet
+metadata.parquet
+temp_features.parquet
+temp_metadata.parquet
+nlp_semantic_features.parquet
+
+# Raw challenge downloads
+*India_runs_data_and_ai_challenge/
+__MACOSX/
