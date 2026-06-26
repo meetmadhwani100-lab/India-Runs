@@ -427,9 +427,9 @@ Soft penalties allow fraudulent profiles to still appear in the shortlist. Setti
 
 ## 👥 Team
 
-**India Runs — Hackathon 2026**
-
-Built for the Redrob Challenge: *Intelligent Candidate Discovery* (Track 01)
+**Neurobyte**
+**India-runs Hackathon 2026**
+Built for the Redrob Challenge: *AI and Data Challenge* (Track 01)
 
 ---
 
